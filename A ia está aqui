@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutor IA</title>
+<style>
+:root{--paper:#fbfaf5;--line:#cfdcec;--ink:#1c2b4a;--margin:#e0605a;--hl:#ffe45c;--soft:#eef3fa}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:16px/1.55 system-ui,sans-serif;color:var(--ink);background:var(--paper);display:flex;flex-direction:column;
+background-image:linear-gradient(var(--line) 1px,transparent 1px);background-size:100% 28px}
+header{padding:12px 16px;background:var(--paper);border-bottom:2px solid var(--ink);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font:700 1.4rem Georgia,serif;margin:0;flex:1}
+h1 span{background:var(--hl);padding:0 6px}
+button,select,input,textarea{font:inherit;color:inherit}
+.ghost{background:none;border:1.5px solid var(--ink);border-radius:6px;padding:4px 10px;cursor:pointer}
+#cfg{display:none;width:100%;gap:8px;flex-wrap:wrap}
+#cfg.on{display:flex}
+#cfg input,#cfg select{border:1.5px solid var(--ink);border-radius:6px;padding:6px 8px;background:#fff;min-width:0}
+#cfg input{flex:1 1 200px}
+#cfg small{width:100%;opacity:.75}
+.chips{display:flex;gap:6px;padding:8px 16px;overflow-x:auto;background:var(--paper);border-bottom:1px solid var(--line)}
+.chips button{white-space:nowrap;border:1.5px solid var(--ink);background:#fff;border-radius:99px;padding:3px 12px;cursor:pointer}
+.chips button[aria-pressed=true]{background:var(--ink);color:#fff}
+main{flex:1;overflow-y:auto;padding:16px 16px 8px 52px;border-left:2px solid var(--margin);margin-left:28px;scroll-behavior:smooth}
+.msg{max-width:720px;margin:0 0 14px;padding:10px 14px;border-radius:10px;white-space:normal;overflow-wrap:anywhere}
+.u{background:var(--ink);color:#fff;margin-left:auto;width:fit-content}
+.b{background:#fff;border:1.5px solid var(--ink)}
+.b code,.b pre{background:var(--soft);border-radius:4px;font-family:ui-monospace,monospace;font-size:.9em}
+.b code{padding:1px 4px}.b pre{padding:8px;overflow-x:auto}
+.b strong{background:linear-gradient(transparent 55%,var(--hl) 55%)}
+.empty{max-width:560px;font:italic 1.15rem Georgia,serif}
+form{display:flex;gap:8px;padding:10px 16px;background:var(--paper);border-top:2px solid var(--ink)}
+textarea{flex:1;resize:none;border:1.5px solid var(--ink);border-radius:8px;padding:8px 10px;background:#fff;max-height:140px}
+#go{background:var(--ink);color:#fff;border:0;border-radius:8px;padding:0 18px;cursor:pointer}
+#go:disabled{opacity:.5}
+.tools{display:flex}
+#photo{border:1.5px solid var(--ink);background:#fff;border-radius:8px;padding:0 12px;cursor:pointer}
+#prev{display:none;padding:6px 16px;background:var(--paper);border-top:1px solid var(--line);align-items:center;gap:10px}
+#prev.on{display:flex}#prev img{height:52px;border-radius:6px;border:1.5px solid var(--ink)}
+#mode[aria-pressed=true]{background:var(--hl)}
+:focus-visible{outline:3px solid var(--margin);outline-offset:2px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tutor <span>IA</span></h1>
+  <button class="ghost" id="mode" type="button" aria-pressed="false">Modo: resposta completa</button>
+  <button class="ghost" id="clear" type="button">Nova conversa</button>
+  <button class="ghost" id="gear" type="button">Configurar</button>
+  <div id="cfg">
+    <select id="prov"><option value="gemini">Gemini (grátis)</option><option value="groq">Groq (grátis)</option></select>
+    <input id="key" type="password" placeholder="Cole sua chave de API" autocomplete="off">
+    <button class="ghost" id="save" type="button">Salvar</button>
+    <small>A chave fica só neste navegador e é enviada apenas ao provedor escolhido. Gemini: aistudio.google.com/apikey · Groq: console.groq.com/keys</small>
+  </div>
+</header>
+<div class="chips" id="chips"></div>
+<main id="chat"></main>
+<div id="prev"><img id="thumb" alt="Foto do exercício"><button class="ghost" id="rm" type="button">Remover foto</button></div>
+<form id="f">
+  <input type="file" id="file" accept="image/*" hidden>
+  <button id="photo" type="button" aria-label="Enviar foto de exercício">📷</button>
+  <textarea id="q" rows="1" placeholder="Pergunte qualquer coisa da matéria…" aria-label="Pergunta"></textarea>
+  <button id="go">Enviar</button>
+</form>
+<script>
+const SUBJECTS=["Geral","Matemática","Português","Física","Química","Biologia","História","Geografia","Inglês","Redação","Programação"];
+const MODELS={gemini:"gemini-2.5-flash",groq:"llama-3.3-70b-versatile"};
+const $=id=>document.getElementById(id);
+let subject="Geral",history=[];
+const store={get:k=>{try{return localStorage.getItem(k)||""}catch(e){return""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+
+$("prov").value=store.get("prov")||"gemini";$("key").value=store.get("key");
+if(!store.get("key"))$("cfg").classList.add("on");
+$("gear").onclick=()=>$("cfg").classList.toggle("on");
+$("save").onclick=()=>{store.set("prov",$("prov").value);store.set("key",$("key").value.trim());$("cfg").classList.remove("on")};
+
+SUBJECTS.forEach(s=>{const b=document.createElement("button");b.type="button";b.textContent=s;b.setAttribute("aria-pressed",s===subject);
+b.onclick=()=>{subject=s;[...$("chips").children].forEach(c=>c.setAttribute("aria-pressed",c===b))};$("chips").append(b)});
+
+function system(){return `Você é um tutor paciente e preciso. Matéria atual: ${subject}. Responda em português do Brasil, a menos que o aluno peça outro idioma. Explique passo a passo com exemplos simples. Em exercícios, mostre o raciocínio completo e confira o resultado no fim. Se não tiver certeza, diga. Não use LaTeX: escreva fórmulas em texto simples (ex.: x^2 + 3x = 0). ${hint?"MODO SÓ DICAS: não entregue a resposta final. Dê dicas graduais, faça perguntas que guiem o aluno e peça que ele tente o próximo passo. Só mostre a solução completa se ele pedir isso explicitamente.":"Dê a resolução completa."} Se houver foto, leia o exercício com atenção antes de responder. Use **negrito** para termos-chave e \`código\` quando fizer sentido.`}
+
+function md(t){
+  t=t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  t=t.replace(/```(?:\w+)?\n([\s\S]*?)```/g,(_,c)=>`<pre>${c}</pre>`);
+  t=t.replace(/`([^`\n]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  return t.replace(/\n/g,"<br>").replace(/<pre>([\s\S]*?)<\/pre>/g,(m)=>m.replace(/<br>/g,"\n"));
+}
+function add(cls,html){const d=document.createElement("div");d.className="msg "+cls;d.innerHTML=html;$("chat").append(d);$("chat").scrollTop=1e9;return d}
+function reset(){history=[];$("chat").innerHTML='<p class="empty">Escolha a matéria acima e mande sua dúvida. Eu explico passo a passo.</p>'}
+$("clear").onclick=reset;reset();
+
+let hint=false,img=null;
+$("mode").onclick=()=>{hint=!hint;$("mode").setAttribute("aria-pressed",hint);$("mode").textContent=hint?"Modo: só dicas":"Modo: resposta completa"};
+$("photo").onclick=()=>$("file").click();
+$("file").onchange=e=>{const f=e.target.files[0];e.target.value="";if(!f)return;
+  const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");
+  c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);
+  img=c.toDataURL("image/jpeg",.85);$("thumb").src=img;$("prev").classList.add("on");URL.revokeObjectURL(im.src)};
+  im.src=URL.createObjectURL(f)};
+$("rm").onclick=()=>{img=null;$("prev").classList.remove("on")};
+
+async function ask(){
+  const key=store.get("key"),prov=store.get("prov")||"gemini";
+  if(!key)throw new Error("Cole sua chave de API em Configurar.");
+  const recent=history.slice(-20),last=recent.length-1;
+  if(prov==="gemini"){
+    const contents=recent.map((m,i)=>{const p=[{text:m.text}];
+      if(m.img&&i===last)p.push({inlineData:{mimeType:"image/jpeg",data:m.img.split(",")[1]}});
+      return{role:m.role==="user"?"user":"model",parts:p}});
+    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELS.gemini}:generateContent`,{method:"POST",
+      headers:{"Content-Type":"application/json","x-goog-api-key":key},
+      body:JSON.stringify({systemInstruction:{parts:[{text:system()}]},contents})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Erro "+r.status);
+    return d.candidates?.[0]?.content?.parts?.map(p=>p.text).join("")||"(sem resposta)";
+  }
+  const withImg=!!recent[last].img;
+  const msgs=recent.map((m,i)=>({role:m.role==="user"?"user":"assistant",
+    content:(m.img&&i===last)?[{type:"text",text:m.text},{type:"image_url",image_url:{url:m.img}}]:m.text}));
+  const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",
+    headers:{"Content-Type":"application/json",Authorization:"Bearer "+key},
+    body:JSON.stringify({model:withImg?"meta-llama/llama-4-scout-17b-16e-instruct":MODELS.groq,messages:[{role:"system",content:system()},...msgs]})});
+  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Erro "+r.status);
+  return d.choices[0].message.content;
+}
+
+$("f").onsubmit=async e=>{
+  e.preventDefault();const text=$("q").value.trim()||(img?"Me ajude com o exercício da foto.":"");if(!text)return;
+  if(!history.length)$("chat").innerHTML="";
+  $("q").value="";$("q").style.height="auto";$("go").disabled=true;
+  history.push({role:"user",text,img});
+  add("u",(img?`<img src="${img}" alt="" style="max-width:100%;border-radius:6px;display:block;margin-bottom:6px">`:"")+md(text));
+  img=null;$("prev").classList.remove("on");
+  const w=add("b","Pensando…");
+  try{const a=await ask();history.push({role:"model",text:a});w.innerHTML=md(a)}
+  catch(err){history.pop();w.innerHTML="Não consegui responder: "+md(err.message)+"<br>Confira a chave e o provedor em Configurar."}
+  $("go").disabled=false;$("chat").scrollTop=1e9;$("q").focus();
+};
+$("q").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("f").requestSubmit()}});
+$("q").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"});
+</script>
+</body>
+</html>
